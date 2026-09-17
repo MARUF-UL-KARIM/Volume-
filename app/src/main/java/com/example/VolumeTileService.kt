@@ -14,6 +14,11 @@ class VolumeTileService : TileService() {
         updateTile()
     }
 
+    override fun onTileAdded() {
+        super.onTileAdded()
+        updateTile()
+    }
+
     override fun onClick() {
         super.onClick()
 
@@ -28,7 +33,7 @@ class VolumeTileService : TileService() {
             return
         }
 
-        // Toggle / Turn on bubble directly from Quick Settings (Notification Bar)
+        // Toggle / Spawn or remove bubble directly from Quick Settings (Notification Bar)
         val prefs = VolumePreferences(this)
         val isShowing = FloatingBubbleService.isServiceRunning && FloatingBubbleService.isBubbleShowing
 
@@ -42,7 +47,7 @@ class VolumeTileService : TileService() {
             } else {
                 startService(intent)
             }
-            Toast.makeText(this, "Volume Bubble activated", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Volume Bubble spawned", Toast.LENGTH_SHORT).show()
 
             // Close notification shade so bubble is immediately visible on screen
             try {
@@ -50,11 +55,12 @@ class VolumeTileService : TileService() {
                 sendBroadcast(Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
             } catch (_: Exception) {}
         } else {
+            prefs.isBubbleVisible = false
             val intent = Intent(this, FloatingBubbleService::class.java).apply {
                 action = FloatingBubbleService.ACTION_TOGGLE_BUBBLE
             }
             startService(intent)
-            Toast.makeText(this, "Volume Bubble hidden", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Volume Bubble removed", Toast.LENGTH_SHORT).show()
         }
 
         updateTile()
@@ -64,9 +70,9 @@ class VolumeTileService : TileService() {
         val tile = qsTile ?: return
         val isShowing = FloatingBubbleService.isServiceRunning && FloatingBubbleService.isBubbleShowing
         tile.state = if (isShowing) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        tile.label = getString(R.string.app_name)
+        tile.label = "Volume Bubble"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            tile.subtitle = if (isShowing) "ON" else "OFF"
+            tile.subtitle = if (isShowing) "Active" else "Inactive"
         }
         tile.updateTile()
     }

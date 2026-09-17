@@ -57,6 +57,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -72,6 +73,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -104,6 +107,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_FORCE_OPEN = "extra_force_open"
+        const val EXTRA_OPEN_CONFIG = "extra_open_config"
     }
 
     private lateinit var prefs: VolumePreferences
@@ -119,6 +123,8 @@ class MainActivity : ComponentActivity() {
             startBubbleService()
         }
 
+        val openConfigInitial = intent?.getBooleanExtra(EXTRA_OPEN_CONFIG, false) ?: false
+
         setContent {
             var darkMode by remember { mutableIntStateOf(prefs.darkMode) }
             val isDarkTheme = when (darkMode) {
@@ -130,6 +136,7 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme(darkTheme = isDarkTheme) {
                 MainScreen(
                     prefs = prefs,
+                    initialOpenConfig = openConfigInitial,
                     onDarkModeChange = { newMode ->
                         darkMode = newMode
                         prefs.darkMode = newMode
@@ -150,6 +157,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
     }
 
     override fun onResume() {
@@ -206,6 +218,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(
     prefs: VolumePreferences,
+    initialOpenConfig: Boolean = false,
     onDarkModeChange: (Int) -> Unit,
     onRequestOverlayPermission: () -> Unit,
     onStartService: () -> Unit,
@@ -226,6 +239,8 @@ fun MainScreen(
         } else true
         onDispose { }
     }
+
+    var selectedTab by remember { mutableIntStateOf(if (initialOpenConfig) 1 else 0) }
 
     var bubbleSize by remember { mutableIntStateOf(prefs.bubbleSizeDp) }
     var bubbleOpacity by remember { mutableFloatStateOf(prefs.bubbleOpacity) }
@@ -270,28 +285,55 @@ fun MainScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Image(
-                            painter = painterResource(id = R.drawable.ic_app_logo),
-                            contentDescription = "App Logo",
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "Volume Bubble",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+            Column {
+                TopAppBar(
+                    title = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_app_logo),
+                                contentDescription = "App Logo",
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Volume Bubble",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 19.sp
+                                )
+                                Text(
+                                    text = if (isDualMode) "Dual Button Mode" else "Single Bubble Mode",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
                 )
-            )
+                TabRow(
+                    selectedTabIndex = selectedTab,
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Tab(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        text = { Text("Controls", fontWeight = FontWeight.SemiBold) },
+                        icon = { Icon(Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    )
+                    Tab(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        text = { Text("Configuration", fontWeight = FontWeight.SemiBold) },
+                        icon = { Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                    )
+                }
+            }
         }
     ) { innerPadding ->
         Column(
@@ -299,429 +341,484 @@ fun MainScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Permission Banner (if not granted)
-            if (!hasOverlayPermission) {
+            if (selectedTab == 0) {
+                // ==================== TAB 0: CONTROLS ====================
+                // Permission Banner (if not granted)
+                if (!hasOverlayPermission) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Overlay Permission Required",
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    fontSize = 16.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "To display the draggable floating bubble over other apps, please grant 'Appear on top' permission.",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                fontSize = 13.sp
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(
+                                onClick = onRequestOverlayPermission,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaterialTheme.colorScheme.error
+                                )
+                            ) {
+                                Text("Grant Permission")
+                            }
+                        }
+                    }
+                } else {
+                    // Status Card
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (isServiceRunning) "Floating Bubble Active" else "Bubble Paused",
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        fontSize = 16.sp
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "Toggle bubbles or use Quick Settings tile",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                )
+                            }
+
+                            Switch(
+                                checked = isServiceRunning,
+                                onCheckedChange = { isChecked ->
+                                    isServiceRunning = isChecked
+                                    if (isChecked) {
+                                        onStartService()
+                                    } else {
+                                        onStopService()
+                                    }
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.surface
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // Quick Test Volume Slider (inside app)
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Audio Volume Test",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (inAppVolume == 0) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer
+                            ) {
+                                val percent = if (inAppMaxVolume > 0) ((inAppVolume.toFloat() / inAppMaxVolume) * 100).roundToInt() else 0
+                                Text(
+                                    text = if (inAppVolume == 0) "0% (Zero)" else "$percent%",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (inAppVolume == 0) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Stream Selector Chips (Media, Ring, Alarm, Call)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            FilterChip(
+                                selected = selectedStream == AudioManager.STREAM_MUSIC,
+                                onClick = {
+                                    selectedStream = AudioManager.STREAM_MUSIC
+                                    prefs.selectedStream = AudioManager.STREAM_MUSIC
+                                    inAppVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+                                    onPrefsUpdated()
+                                },
+                                label = { Text("Media", fontSize = 10.5.sp, maxLines = 1) },
+                                leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = selectedStream == AudioManager.STREAM_RING,
+                                onClick = {
+                                    selectedStream = AudioManager.STREAM_RING
+                                    prefs.selectedStream = AudioManager.STREAM_RING
+                                    inAppVolume = audioManager.getStreamVolume(AudioManager.STREAM_RING)
+                                    onPrefsUpdated()
+                                },
+                                label = { Text("Ring", fontSize = 10.5.sp, maxLines = 1) },
+                                leadingIcon = { Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = selectedStream == AudioManager.STREAM_ALARM,
+                                onClick = {
+                                    selectedStream = AudioManager.STREAM_ALARM
+                                    prefs.selectedStream = AudioManager.STREAM_ALARM
+                                    inAppVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
+                                    onPrefsUpdated()
+                                },
+                                label = { Text("Alarm", fontSize = 10.5.sp, maxLines = 1) },
+                                leadingIcon = { Icon(Icons.Default.Alarm, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = selectedStream == AudioManager.STREAM_VOICE_CALL,
+                                onClick = {
+                                    selectedStream = AudioManager.STREAM_VOICE_CALL
+                                    prefs.selectedStream = AudioManager.STREAM_VOICE_CALL
+                                    inAppVolume = if (prefs.isCallZeroVolume) 0 else audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
+                                    onPrefsUpdated()
+                                },
+                                label = { Text("Call", fontSize = 10.5.sp, maxLines = 1) },
+                                leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Slider(
+                            value = inAppVolume.toFloat(),
+                            onValueChange = {
+                                val newVol = it.roundToInt()
+                                inAppVolume = newVol
+                                if (selectedStream == AudioManager.STREAM_VOICE_CALL) {
+                                    if (newVol == 0) {
+                                        prefs.isCallZeroVolume = true
+                                        try { audioManager.setStreamVolume(selectedStream, 0, 0) } catch (_: Exception) {}
+                                        try { audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_MUTE, 0) } catch (_: Exception) {}
+                                    } else {
+                                        prefs.isCallZeroVolume = false
+                                        try { audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_UNMUTE, 0) } catch (_: Exception) {}
+                                        try { audioManager.setStreamVolume(selectedStream, newVol, 0) } catch (_: Exception) {}
+                                    }
+                                } else {
+                                    audioManager.setStreamVolume(selectedStream, newVol, 0)
+                                }
+                                onPrefsUpdated()
+                            },
+                            valueRange = 0f..inAppMaxVolume.toFloat(),
+                            steps = if (inAppMaxVolume > 1) inAppMaxVolume - 1 else 0,
+                            colors = SliderDefaults.colors(
+                                thumbColor = MaterialTheme.colorScheme.primary,
+                                activeTrackColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilledTonalIconButton(
+                                onClick = {
+                                    val uiFlag = if (showSystemSlider) AudioManager.FLAG_SHOW_UI else 0
+                                    if (selectedStream == AudioManager.STREAM_VOICE_CALL) {
+                                        val nextVol = (inAppVolume - 1).coerceAtLeast(0)
+                                        inAppVolume = nextVol
+                                        if (nextVol == 0) {
+                                            prefs.isCallZeroVolume = true
+                                            try { audioManager.setStreamVolume(selectedStream, 0, uiFlag) } catch (_: Exception) {}
+                                            try { audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_MUTE, uiFlag) } catch (_: Exception) {}
+                                        } else {
+                                            prefs.isCallZeroVolume = false
+                                            try { audioManager.setStreamVolume(selectedStream, nextVol, uiFlag) } catch (_: Exception) {}
+                                        }
+                                    } else {
+                                        audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_LOWER, uiFlag)
+                                        inAppVolume = audioManager.getStreamVolume(selectedStream)
+                                    }
+                                    onPrefsUpdated()
+                                }
+                            ) {
+                                Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                            }
+
+                            Text(
+                                text = if (selectedStream == AudioManager.STREAM_VOICE_CALL && inAppVolume == 0) "Call Volume: 0 (Muted)" else "Step-by-step buttons",
+                                fontSize = 12.sp,
+                                fontWeight = if (selectedStream == AudioManager.STREAM_VOICE_CALL && inAppVolume == 0) FontWeight.Bold else FontWeight.Normal,
+                                color = if (selectedStream == AudioManager.STREAM_VOICE_CALL && inAppVolume == 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            FilledTonalIconButton(
+                                onClick = {
+                                    val uiFlag = if (showSystemSlider) AudioManager.FLAG_SHOW_UI else 0
+                                    if (selectedStream == AudioManager.STREAM_VOICE_CALL) {
+                                        val nextVol = (inAppVolume + 1).coerceAtMost(inAppMaxVolume)
+                                        inAppVolume = nextVol
+                                        prefs.isCallZeroVolume = false
+                                        try { audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_UNMUTE, uiFlag) } catch (_: Exception) {}
+                                        try { audioManager.setStreamVolume(selectedStream, nextVol, uiFlag) } catch (_: Exception) {}
+                                    } else {
+                                        audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_RAISE, uiFlag)
+                                        inAppVolume = audioManager.getStreamVolume(selectedStream)
+                                    }
+                                    onPrefsUpdated()
+                                }
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = "Increase")
+                            }
+                        }
+                    }
+                }
+
+                // Quick Settings Tile Feature Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
                     )
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                imageVector = Icons.Default.Warning,
+                                Icons.Default.Tune,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onErrorContainer
+                                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                modifier = Modifier.size(22.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(10.dp))
                             Text(
-                                text = "Overlay Permission Required",
+                                text = "Quick Settings Panel Tile",
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                fontSize = 16.sp
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "To display the draggable floating bubble over other apps, please grant 'Appear on top' permission.",
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                            fontSize = 13.sp
+                            text = "You can toggle the Volume Bubble directly from Android's notification shade! Swipe down from the top of your screen, edit your tiles, and add the 'Volume Bubble' tile for 1-tap access anywhere.",
+                            fontSize = 12.5.sp,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.85f),
+                            lineHeight = 17.sp
                         )
                         Spacer(modifier = Modifier.height(12.dp))
-                        Button(
-                            onClick = onRequestOverlayPermission,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = MaterialTheme.colorScheme.error
-                            )
+                        FilledTonalButton(
+                            onClick = { selectedTab = 1 },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Grant Permission")
+                            Icon(Icons.Default.Tune, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Open Configuration Screen")
                         }
                     }
                 }
-            } else {
-                // Status Card
+
+                // Status Bar Notification Card
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Icon(
+                            Icons.Default.Notifications,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text(
-                                    text = if (isServiceRunning) "Floating Bubble Active" else "Bubble Paused",
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    fontSize = 16.sp
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Quick controls active in status bar",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                            )
-                        }
-
-                        Switch(
-                            checked = isServiceRunning,
-                            onCheckedChange = { isChecked ->
-                                isServiceRunning = isChecked
-                                if (isChecked) {
-                                    onStartService()
-                                } else {
-                                    onStopService()
-                                }
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                checkedTrackColor = MaterialTheme.colorScheme.surface
-                            )
-                        )
-                    }
-                }
-            }
-
-            // Quick Test Volume Slider (inside app)
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Audio Volume Test",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (inAppVolume == 0) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer
-                        ) {
-                            val percent = if (inAppMaxVolume > 0) ((inAppVolume.toFloat() / inAppMaxVolume) * 100).roundToInt() else 0
-                            Text(
-                                text = if (inAppVolume == 0) "0% (Zero)" else "$percent%",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                fontSize = 12.sp,
+                                text = "Status Bar Notification Controls",
                                 fontWeight = FontWeight.Bold,
-                                color = if (inAppVolume == 0) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Stream Selector Chips (Media, Ring, Alarm, Call)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        FilterChip(
-                            selected = selectedStream == AudioManager.STREAM_MUSIC,
-                            onClick = {
-                                selectedStream = AudioManager.STREAM_MUSIC
-                                prefs.selectedStream = AudioManager.STREAM_MUSIC
-                                inAppVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-                                onPrefsUpdated()
-                            },
-                            label = { Text("Media", fontSize = 10.5.sp, maxLines = 1) },
-                            leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(13.dp)) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = selectedStream == AudioManager.STREAM_RING,
-                            onClick = {
-                                selectedStream = AudioManager.STREAM_RING
-                                prefs.selectedStream = AudioManager.STREAM_RING
-                                inAppVolume = audioManager.getStreamVolume(AudioManager.STREAM_RING)
-                                onPrefsUpdated()
-                            },
-                            label = { Text("Ring", fontSize = 10.5.sp, maxLines = 1) },
-                            leadingIcon = { Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(13.dp)) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = selectedStream == AudioManager.STREAM_ALARM,
-                            onClick = {
-                                selectedStream = AudioManager.STREAM_ALARM
-                                prefs.selectedStream = AudioManager.STREAM_ALARM
-                                inAppVolume = audioManager.getStreamVolume(AudioManager.STREAM_ALARM)
-                                onPrefsUpdated()
-                            },
-                            label = { Text("Alarm", fontSize = 10.5.sp, maxLines = 1) },
-                            leadingIcon = { Icon(Icons.Default.Alarm, contentDescription = null, modifier = Modifier.size(13.dp)) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = selectedStream == AudioManager.STREAM_VOICE_CALL,
-                            onClick = {
-                                selectedStream = AudioManager.STREAM_VOICE_CALL
-                                prefs.selectedStream = AudioManager.STREAM_VOICE_CALL
-                                inAppVolume = if (prefs.isCallZeroVolume) 0 else audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL)
-                                onPrefsUpdated()
-                            },
-                            label = { Text("Call", fontSize = 10.5.sp, maxLines = 1) },
-                            leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(13.dp)) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    Slider(
-                        value = inAppVolume.toFloat(),
-                        onValueChange = {
-                            val newVol = it.roundToInt()
-                            inAppVolume = newVol
-                            if (selectedStream == AudioManager.STREAM_VOICE_CALL) {
-                                if (newVol == 0) {
-                                    prefs.isCallZeroVolume = true
-                                    try { audioManager.setStreamVolume(selectedStream, 0, 0) } catch (_: Exception) {}
-                                    try { audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_MUTE, 0) } catch (_: Exception) {}
-                                } else {
-                                    prefs.isCallZeroVolume = false
-                                    try { audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_UNMUTE, 0) } catch (_: Exception) {}
-                                    try { audioManager.setStreamVolume(selectedStream, newVol, 0) } catch (_: Exception) {}
-                                }
-                            } else {
-                                audioManager.setStreamVolume(selectedStream, newVol, 0)
-                            }
-                            onPrefsUpdated()
-                        },
-                        valueRange = 0f..inAppMaxVolume.toFloat(),
-                        steps = if (inAppMaxVolume > 1) inAppMaxVolume - 1 else 0,
-                        colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.primary,
-                            activeTrackColor = MaterialTheme.colorScheme.primary
-                        )
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FilledTonalIconButton(
-                            onClick = {
-                                if (selectedStream == AudioManager.STREAM_VOICE_CALL) {
-                                    val nextVol = (inAppVolume - 1).coerceAtLeast(0)
-                                    inAppVolume = nextVol
-                                    if (nextVol == 0) {
-                                        prefs.isCallZeroVolume = true
-                                        try { audioManager.setStreamVolume(selectedStream, 0, AudioManager.FLAG_SHOW_UI) } catch (_: Exception) {}
-                                        try { audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI) } catch (_: Exception) {}
-                                    } else {
-                                        prefs.isCallZeroVolume = false
-                                        try { audioManager.setStreamVolume(selectedStream, nextVol, AudioManager.FLAG_SHOW_UI) } catch (_: Exception) {}
-                                    }
-                                } else {
-                                    audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
-                                    inAppVolume = audioManager.getStreamVolume(selectedStream)
-                                }
-                                onPrefsUpdated()
-                            }
-                        ) {
-                            Icon(Icons.Default.Remove, contentDescription = "Decrease")
-                        }
-
-                        Text(
-                            text = if (selectedStream == AudioManager.STREAM_VOICE_CALL && inAppVolume == 0) "Call Volume: 0 (Muted)" else "Step-by-step buttons",
-                            fontSize = 12.sp,
-                            fontWeight = if (selectedStream == AudioManager.STREAM_VOICE_CALL && inAppVolume == 0) FontWeight.Bold else FontWeight.Normal,
-                            color = if (selectedStream == AudioManager.STREAM_VOICE_CALL && inAppVolume == 0) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-
-                        FilledTonalIconButton(
-                            onClick = {
-                                if (selectedStream == AudioManager.STREAM_VOICE_CALL) {
-                                    val nextVol = (inAppVolume + 1).coerceAtMost(inAppMaxVolume)
-                                    inAppVolume = nextVol
-                                    prefs.isCallZeroVolume = false
-                                    try { audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_SHOW_UI) } catch (_: Exception) {}
-                                    try { audioManager.setStreamVolume(selectedStream, nextVol, AudioManager.FLAG_SHOW_UI) } catch (_: Exception) {}
-                                } else {
-                                    audioManager.adjustStreamVolume(selectedStream, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
-                                    inAppVolume = audioManager.getStreamVolume(selectedStream)
-                                }
-                                onPrefsUpdated()
-                            }
-                        ) {
-                            Icon(Icons.Default.Add, contentDescription = "Increase")
-                        }
-                    }
-                }
-            }
-
-            // Bubble Appearance & Customization Card
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Bubble Customization",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Size Slider
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.PhotoSizeSelectSmall, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = "Bubble Size", fontSize = 14.sp)
-                        }
-                        Text(text = "${bubbleSize}dp", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    }
-                    Slider(
-                        value = bubbleSize.toFloat(),
-                        onValueChange = {
-                            bubbleSize = it.roundToInt()
-                            prefs.bubbleSizeDp = bubbleSize
-                            onPrefsUpdated()
-                        },
-                        valueRange = 40f..80f,
-                        steps = 7
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Opacity Slider
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Opacity, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(text = "Bubble Opacity", fontSize = 14.sp)
-                        }
-                        Text(text = "${(bubbleOpacity * 100).roundToInt()}%", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    }
-                    Slider(
-                        value = bubbleOpacity,
-                        onValueChange = {
-                            bubbleOpacity = it
-                            prefs.bubbleOpacity = bubbleOpacity
-                            onPrefsUpdated()
-                        },
-                        valueRange = 0.3f..1.0f
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Live Bubble Preview
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(bubbleSize.dp)
-                                .alpha(bubbleOpacity)
-                                .shadow(8.dp, CircleShape)
-                                .clip(CircleShape)
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(
-                                            MaterialTheme.colorScheme.primary,
-                                            MaterialTheme.colorScheme.tertiary
-                                        )
-                                    )
-                                )
-                                .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.VolumeUp,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size((bubbleSize * 0.45f).dp)
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Dual (+ / -) Quick Volume Buttons Card
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Dual (+ / -) Quick Buttons",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
+                                fontSize = 14.sp
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "Show separate + and - buttons directly on screen",
+                                text = "Vol +, Vol -, Mute, and Bubble toggle are always accessible directly from your notification panel.",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Switch(
-                            checked = isDualMode,
-                            onCheckedChange = {
-                                isDualMode = it
-                                prefs.isDualButtonMode = it
-                                onPrefsUpdated()
-                            },
-                            colors = SwitchDefaults.colors(
-                                checkedThumbColor = MaterialTheme.colorScheme.primary,
-                                checkedTrackColor = MaterialTheme.colorScheme.surface
-                            )
-                        )
                     }
+                }
+            } else {
+                // ==================== TAB 1: CONFIGURATION SCREEN ====================
 
-                    AnimatedVisibility(visible = isDualMode) {
-                        Column {
+                // 1. Native System Volume Slider Visibility Card
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "System Volume Slider UI",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                                Spacer(modifier = Modifier.height(3.dp))
+                                Text(
+                                    text = "Show phone's native volume popup when tapping +/-",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = showSystemSlider,
+                                onCheckedChange = {
+                                    showSystemSlider = it
+                                    prefs.showSystemVolumeSlider = it
+                                    onPrefsUpdated()
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.surface
+                                )
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (!showSystemSlider) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (!showSystemSlider) Icons.Default.CheckCircle else Icons.Default.VolumeUp,
+                                    contentDescription = null,
+                                    tint = if (!showSystemSlider) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = if (!showSystemSlider)
+                                        "Silent Click Mode: Tapping + or - changes volume directly with NO system popup and NO annoying repetitive vibration!"
+                                    else
+                                        "System Popup Mode: Tapping + or - triggers the phone's native sound slider overlay and vibration feedback.",
+                                    fontSize = 12.sp,
+                                    lineHeight = 16.sp,
+                                    color = if (!showSystemSlider) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 2. Dual (+ / -) Mode & Orientation
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Dual (+ / -) Quick Buttons",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Spawn separate + and - buttons directly on screen",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Switch(
+                                checked = isDualMode,
+                                onCheckedChange = {
+                                    isDualMode = it
+                                    prefs.isDualButtonMode = it
+                                    onPrefsUpdated()
+                                },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.surface
+                                )
+                            )
+                        }
+
+                        if (isDualMode) {
                             Spacer(modifier = Modifier.height(14.dp))
 
                             // Alignment: Vertical vs Horizontal
                             Text(
-                                text = "Button Alignment",
+                                text = "Button Orientation / Alignment",
                                 fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.height(6.dp))
@@ -736,7 +833,7 @@ fun MainScreen(
                                         prefs.isDualVertical = true
                                         onPrefsUpdated()
                                     },
-                                    label = { Text("Top / Bottom", fontSize = 12.sp) },
+                                    label = { Text("Vertical (Top / Bottom)", fontSize = 12.sp) },
                                     modifier = Modifier.weight(1f)
                                 )
                                 FilterChip(
@@ -746,17 +843,40 @@ fun MainScreen(
                                         prefs.isDualVertical = false
                                         onPrefsUpdated()
                                     },
-                                    label = { Text("Side by Side", fontSize = 12.sp) },
+                                    label = { Text("Horizontal (Side by Side)", fontSize = 12.sp) },
                                     modifier = Modifier.weight(1f)
                                 )
                             }
 
                             Spacer(modifier = Modifier.height(14.dp))
 
+                            // Distance Between Buttons Slider
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(text = "Spacing Between Buttons", fontSize = 14.sp)
+                                Text(text = "${dualGap}dp", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                            Slider(
+                                value = dualGap.toFloat(),
+                                onValueChange = {
+                                    dualGap = it.roundToInt()
+                                    prefs.dualButtonGapDp = dualGap
+                                    onPrefsUpdated()
+                                },
+                                valueRange = 0f..40f,
+                                steps = 7
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
                             // Target Sound Stream
                             Text(
                                 text = "Target Sound Stream",
                                 fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.height(6.dp))
@@ -826,339 +946,303 @@ fun MainScreen(
                                     modifier = Modifier.weight(1f)
                                 )
                             }
+                        }
+                    }
+                }
 
-                            Spacer(modifier = Modifier.height(14.dp))
+                // 3. Bubble Size & Opacity Card
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = if (isDualMode) "Button Dimensions & Opacity" else "Bubble Dimensions & Opacity",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
 
-                            // Show Default System Sound Slider Toggle
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Show Phone Sound Slider",
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 14.sp
+                        // Size Slider
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.PhotoSizeSelectSmall, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(text = if (isDualMode) "Button Size" else "Bubble Size", fontSize = 14.sp)
+                            }
+                            Text(text = if (isDualMode) "${dualSize}dp" else "${bubbleSize}dp", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        }
+                        Slider(
+                            value = if (isDualMode) dualSize.toFloat() else bubbleSize.toFloat(),
+                            onValueChange = {
+                                val v = it.roundToInt()
+                                if (isDualMode) {
+                                    dualSize = v
+                                    prefs.dualButtonSizeDp = v
+                                } else {
+                                    bubbleSize = v
+                                    prefs.bubbleSizeDp = v
+                                }
+                                onPrefsUpdated()
+                            },
+                            valueRange = if (isDualMode) 36f..72f else 40f..80f,
+                            steps = 7
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Opacity Slider
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Opacity, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(text = "Opacity", fontSize = 14.sp)
+                            }
+                            Text(
+                                text = "${((if (isDualMode) dualOpacity else bubbleOpacity) * 100).roundToInt()}%",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                        Slider(
+                            value = if (isDualMode) dualOpacity else bubbleOpacity,
+                            onValueChange = {
+                                if (isDualMode) {
+                                    dualOpacity = it
+                                    prefs.dualButtonOpacity = it
+                                } else {
+                                    bubbleOpacity = it
+                                    prefs.bubbleOpacity = it
+                                }
+                                onPrefsUpdated()
+                            },
+                            valueRange = 0.2f..1.0f
+                        )
+                    }
+                }
+
+                // 4. Live Preview Card
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Live Preview",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            modifier = Modifier.align(Alignment.Start)
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        if (isDualMode) {
+                            if (isDualVertical) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(dualGap.dp),
+                                    modifier = Modifier.alpha(dualOpacity)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(dualSize.dp)
+                                            .shadow(6.dp, CircleShape)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.linearGradient(
+                                                    listOf(
+                                                        MaterialTheme.colorScheme.primary,
+                                                        MaterialTheme.colorScheme.tertiary
+                                                    )
+                                                )
+                                            )
+                                            .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(dualSize.dp)
+                                            .shadow(6.dp, CircleShape)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.linearGradient(
+                                                    listOf(
+                                                        MaterialTheme.colorScheme.primary,
+                                                        MaterialTheme.colorScheme.tertiary
+                                                    )
+                                                )
+                                            )
+                                            .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.Remove, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
+                                    }
+                                }
+                            } else {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(dualGap.dp),
+                                    modifier = Modifier.alpha(dualOpacity)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(dualSize.dp)
+                                            .shadow(6.dp, CircleShape)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.linearGradient(
+                                                    listOf(
+                                                        MaterialTheme.colorScheme.primary,
+                                                        MaterialTheme.colorScheme.tertiary
+                                                    )
+                                                )
+                                            )
+                                            .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.Remove, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(dualSize.dp)
+                                            .shadow(6.dp, CircleShape)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.linearGradient(
+                                                    listOf(
+                                                        MaterialTheme.colorScheme.primary,
+                                                        MaterialTheme.colorScheme.tertiary
+                                                    )
+                                                )
+                                            )
+                                            .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
+                                    }
+                                }
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(bubbleSize.dp)
+                                    .alpha(bubbleOpacity)
+                                    .shadow(8.dp, CircleShape)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(
+                                                MaterialTheme.colorScheme.primary,
+                                                MaterialTheme.colorScheme.tertiary
+                                            )
+                                        )
                                     )
+                                    .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.VolumeUp,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size((bubbleSize * 0.45f).dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 5. Dark Mode & Haptic Settings Card
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Theme & Feedback",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        Text(text = "Appearance (Dark Mode)", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            FilterChip(
+                                selected = darkModeOption == 0,
+                                onClick = {
+                                    darkModeOption = 0
+                                    onDarkModeChange(0)
+                                },
+                                label = { Text("System", fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Default.SettingsBrightness, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = darkModeOption == 1,
+                                onClick = {
+                                    darkModeOption = 1
+                                    onDarkModeChange(1)
+                                },
+                                label = { Text("Light", fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Default.LightMode, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                modifier = Modifier.weight(1f)
+                            )
+                            FilterChip(
+                                selected = darkModeOption == 2,
+                                onClick = {
+                                    darkModeOption = 2
+                                    onDarkModeChange(2)
+                                },
+                                label = { Text("Dark", fontSize = 12.sp) },
+                                leadingIcon = { Icon(Icons.Default.DarkMode, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Haptic Feedback Switch
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Vibration, contentDescription = null, modifier = Modifier.size(20.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(text = "Haptic Feedback", fontWeight = FontWeight.Medium, fontSize = 14.sp)
                                     Text(
-                                        text = "Show phone's native volume popup when tapping + or -",
+                                        text = "Vibrate on volume changes and clicks",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                                Switch(
-                                    checked = showSystemSlider,
-                                    onCheckedChange = {
-                                        showSystemSlider = it
-                                        prefs.showSystemVolumeSlider = it
-                                        onPrefsUpdated()
-                                    }
-                                )
                             }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            // Button Size Slider
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.PhotoSizeSelectSmall, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(text = "Button Size", fontSize = 14.sp)
-                                }
-                                Text(text = "${dualSize}dp", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            }
-                            Slider(
-                                value = dualSize.toFloat(),
-                                onValueChange = {
-                                    dualSize = it.roundToInt()
-                                    prefs.dualButtonSizeDp = dualSize
+                            Switch(
+                                checked = isHapticEnabled,
+                                onCheckedChange = {
+                                    isHapticEnabled = it
+                                    prefs.isHapticEnabled = it
                                     onPrefsUpdated()
-                                },
-                                valueRange = 36f..72f,
-                                steps = 8
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // Opacity Slider
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Opacity, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(text = "Button Opacity", fontSize = 14.sp)
                                 }
-                                Text(text = "${(dualOpacity * 100).roundToInt()}%", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            }
-                            Slider(
-                                value = dualOpacity,
-                                onValueChange = {
-                                    dualOpacity = it
-                                    prefs.dualButtonOpacity = dualOpacity
-                                    onPrefsUpdated()
-                                },
-                                valueRange = 0.2f..1.0f
                             )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // Spacing / Distance Slider
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(text = "Distance Between Buttons", fontSize = 14.sp)
-                                }
-                                Text(text = "${dualGap}dp", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            }
-                            Slider(
-                                value = dualGap.toFloat(),
-                                onValueChange = {
-                                    dualGap = it.roundToInt()
-                                    prefs.dualButtonGapDp = dualGap
-                                    onPrefsUpdated()
-                                },
-                                valueRange = 0f..40f,
-                                steps = 7
-                            )
-
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // Live Dual Preview
-                            Text(
-                                text = "Live Preview",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                if (isDualVertical) {
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(dualGap.dp),
-                                        modifier = Modifier.alpha(dualOpacity)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(dualSize.dp)
-                                                .shadow(6.dp, CircleShape)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    Brush.linearGradient(
-                                                        listOf(
-                                                            MaterialTheme.colorScheme.primary,
-                                                            MaterialTheme.colorScheme.tertiary
-                                                        )
-                                                    )
-                                                )
-                                                .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .size(dualSize.dp)
-                                                .shadow(6.dp, CircleShape)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    Brush.linearGradient(
-                                                        listOf(
-                                                            MaterialTheme.colorScheme.primary,
-                                                            MaterialTheme.colorScheme.tertiary
-                                                        )
-                                                    )
-                                                )
-                                                .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(Icons.Default.Remove, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
-                                        }
-                                    }
-                                } else {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(dualGap.dp),
-                                        modifier = Modifier.alpha(dualOpacity)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(dualSize.dp)
-                                                .shadow(6.dp, CircleShape)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    Brush.linearGradient(
-                                                        listOf(
-                                                            MaterialTheme.colorScheme.primary,
-                                                            MaterialTheme.colorScheme.tertiary
-                                                        )
-                                                    )
-                                                )
-                                                .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(Icons.Default.Remove, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .size(dualSize.dp)
-                                                .shadow(6.dp, CircleShape)
-                                                .clip(CircleShape)
-                                                .background(
-                                                    Brush.linearGradient(
-                                                        listOf(
-                                                            MaterialTheme.colorScheme.primary,
-                                                            MaterialTheme.colorScheme.tertiary
-                                                        )
-                                                    )
-                                                )
-                                                .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
-                                        }
-                                    }
-                                }
-                            }
                         }
-                    }
-                }
-            }
-
-            // Dark Mode & Haptic Settings Card
-            ElevatedCard(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(20.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = "Theme & Feedback",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Dark Mode Option
-                    Text(text = "Appearance (Dark Mode)", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
-                            selected = darkModeOption == 0,
-                            onClick = {
-                                darkModeOption = 0
-                                onDarkModeChange(0)
-                            },
-                            label = { Text("System", fontSize = 12.sp) },
-                            leadingIcon = { Icon(Icons.Default.SettingsBrightness, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = darkModeOption == 1,
-                            onClick = {
-                                darkModeOption = 1
-                                onDarkModeChange(1)
-                            },
-                            label = { Text("Light", fontSize = 12.sp) },
-                            leadingIcon = { Icon(Icons.Default.LightMode, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            modifier = Modifier.weight(1f)
-                        )
-                        FilterChip(
-                            selected = darkModeOption == 2,
-                            onClick = {
-                                darkModeOption = 2
-                                onDarkModeChange(2)
-                            },
-                            label = { Text("Dark", fontSize = 12.sp) },
-                            leadingIcon = { Icon(Icons.Default.DarkMode, contentDescription = null, modifier = Modifier.size(16.dp)) },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    // Haptic Feedback Switch
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Vibration, contentDescription = null, modifier = Modifier.size(20.dp))
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Column {
-                                Text(text = "Haptic Feedback", fontWeight = FontWeight.Medium, fontSize = 14.sp)
-                                Text(
-                                    text = "Vibrate on volume changes and clicks",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        Switch(
-                            checked = isHapticEnabled,
-                            onCheckedChange = {
-                                isHapticEnabled = it
-                                prefs.isHapticEnabled = it
-                                onPrefsUpdated()
-                            }
-                        )
-                    }
-                }
-            }
-
-            // Notification / Status Bar Guide Card
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.Default.Notifications,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Status Bar Quick Access",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "Use Vol +, Vol -, Mute, and Bubble toggle right from your notification panel anytime without opening the app.",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }

@@ -21,6 +21,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -158,6 +159,49 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     private var bubbleX = 32
     private var bubbleY = 260
 
+    private fun updateBubblePosition(deltaX: Int, deltaY: Int) {
+        if (isExpandedState.value || !isViewAdded) return
+
+        val displayMetrics = resources.displayMetrics
+        val screenWidth = displayMetrics.widthPixels
+        val screenHeight = displayMetrics.heightPixels
+
+        // Accurately determine bubble bounding box in pixels
+        val density = displayMetrics.density
+        val estimatedW: Int
+        val estimatedH: Int
+        if (isDualModeState.value) {
+            val sizePx = (dualSizeDpState.intValue * density).roundToInt()
+            val gapPx = (dualGapDpState.intValue * density).roundToInt()
+            if (isDualVerticalState.value) {
+                estimatedW = sizePx
+                estimatedH = (sizePx * 2) + gapPx
+            } else {
+                estimatedW = (sizePx * 2) + gapPx
+                estimatedH = sizePx
+            }
+        } else {
+            val sizePx = (bubbleSizeDpState.intValue * density).roundToInt()
+            estimatedW = sizePx
+            estimatedH = sizePx
+        }
+
+        val viewW = if (composeView.width > 0) composeView.width else estimatedW
+        val viewH = if (composeView.height > 0) composeView.height else estimatedH
+
+        val maxX = (screenWidth - viewW).coerceAtLeast(0)
+        val maxY = (screenHeight - viewH).coerceAtLeast(0)
+
+        bubbleX = (bubbleX + deltaX).coerceIn(0, maxX)
+        bubbleY = (bubbleY + deltaY).coerceIn(0, maxY)
+
+        params.x = bubbleX
+        params.y = bubbleY
+        try {
+            windowManager.updateViewLayout(composeView, params)
+        } catch (_: Exception) {}
+    }
+
     private var volumeObserver: ContentObserver? = null
     private var volumeReceiver: BroadcastReceiver? = null
 
@@ -216,7 +260,11 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
 
     private fun adjustDualVolume(delta: Int) {
         val stream = dualStreamTypeState.intValue
-        val flags = if (showSystemSliderState.value) AudioManager.FLAG_SHOW_UI else 0
+        val flags = if (showSystemSliderState.value) {
+            AudioManager.FLAG_SHOW_UI
+        } else {
+            0
+        }
         if (stream == AudioManager.STREAM_VOICE_CALL) {
             val cur = if (prefs.isCallZeroVolume) 0 else audioManager.getStreamVolume(stream)
             val max = audioManager.getStreamMaxVolume(stream).coerceAtLeast(1)
@@ -234,9 +282,7 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
             val direction = if (delta > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
             audioManager.adjustStreamVolume(stream, direction, flags)
         }
-        updateVolumeState(streamTypeState.intValue)
-        triggerHaptic()
-        updateNotification()
+        updateVolumeState(stream)
     }
 
     private fun updateVolumeState(streamType: Int) {
@@ -325,6 +371,97 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
             setViewTreeLifecycleOwner(this@FloatingBubbleService)
             setViewTreeSavedStateRegistryOwner(this@FloatingBubbleService)
 
+            var initialX = 0
+            var initialY = 0
+            var initialTouchX = 0f
+            var initialTouchY = 0f
+            var touchDownLocalX = 0f
+            var touchDownLocalY = 0f
+            var isDragging = false
+            var touchDownTime = 0L
+
+            setOnTouchListener { view, event ->
+                if (isExpandedState.value) {
+                    return@setOnTouchListener false
+                }
+
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        initialX = params.x
+                        initialY = params.y
+                        initialTouchX = event.rawX
+                        initialTouchY = event.rawY
+                        touchDownLocalX = event.x
+                        touchDownLocalY = event.y
+                        touchDownTime = System.currentTimeMillis()
+                        isDragging = false
+                        true
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        val dx = (event.rawX - initialTouchX).toInt()
+                        val dy = (event.rawY - initialTouchY).toInt()
+                        if (!isDragging && (dx * dx + dy * dy > 64)) {
+                            isDragging = true
+                        }
+                        if (isDragging) {
+                            val displayMetrics = resources.displayMetrics
+                            val screenWidth = displayMetrics.widthPixels
+                            val screenHeight = displayMetrics.heightPixels
+                            val viewW = if (view.width > 0) view.width else (56 * displayMetrics.density).roundToInt()
+                            val viewH = if (view.height > 0) view.height else (56 * displayMetrics.density).roundToInt()
+                            val maxX = (screenWidth - viewW).coerceAtLeast(0)
+                            val maxY = (screenHeight - viewH).coerceAtLeast(0)
+
+                            params.x = (initialX + dx).coerceIn(0, maxX)
+                            params.y = (initialY + dy).coerceIn(0, maxY)
+                            bubbleX = params.x
+                            bubbleY = params.y
+                            try {
+                                windowManager.updateViewLayout(composeView, params)
+                            } catch (_: Exception) {}
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_UP -> {
+                        if (isDragging) {
+                            isDragging = false
+                        } else {
+                            val elapsed = System.currentTimeMillis() - touchDownTime
+                            if (elapsed < 600) {
+                                if (isDualModeState.value) {
+                                    val currentH = if (view.height > 0) view.height else (56 * resources.displayMetrics.density).roundToInt()
+                                    val currentW = if (view.width > 0) view.width else (56 * resources.displayMetrics.density).roundToInt()
+                                    if (isDualVerticalState.value) {
+                                        val midY = currentH / 2f
+                                        if (touchDownLocalY < midY) {
+                                            adjustDualVolume(1)
+                                        } else {
+                                            adjustDualVolume(-1)
+                                        }
+                                    } else {
+                                        val midX = currentW / 2f
+                                        if (touchDownLocalX < midX) {
+                                            adjustDualVolume(-1)
+                                        } else {
+                                            adjustDualVolume(1)
+                                        }
+                                    }
+                                } else {
+                                    triggerHaptic()
+                                    setExpanded(true)
+                                }
+                            }
+                        }
+                        true
+                    }
+                    MotionEvent.ACTION_CANCEL -> {
+                        isDragging = false
+                        true
+                    }
+                    else -> false
+                }
+            }
+
             setContent {
                 val isDark = when (darkModeState.intValue) {
                     1 -> false
@@ -339,12 +476,6 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
                         dualOpacity = dualOpacityState.floatValue,
                         dualGapDp = dualGapDpState.intValue,
                         isDualVertical = isDualVerticalState.value,
-                        onPlusClick = {
-                            adjustDualVolume(1)
-                        },
-                        onMinusClick = {
-                            adjustDualVolume(-1)
-                        },
                         isExpanded = isExpandedState.value,
                         isVisible = isBubbleVisibleState.value,
                         bubbleSizeDp = bubbleSizeDpState.intValue,
@@ -353,10 +484,6 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
                         currentVolume = currentVolState.intValue,
                         maxVolume = maxVolState.intValue,
                         isMuted = isMutedState.value,
-                        onBubbleClick = {
-                            triggerHaptic()
-                            setExpanded(true)
-                        },
                         onCloseClick = {
                             triggerHaptic()
                             setExpanded(false)
@@ -378,17 +505,6 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
                         },
                         onOpenSettings = {
                             openMainActivity()
-                        },
-                        onDragDelta = { dx, dy ->
-                            if (!isExpandedState.value) {
-                                bubbleX = (bubbleX + dx).coerceAtLeast(0)
-                                bubbleY = (bubbleY + dy).coerceAtLeast(0)
-                                params.x = bubbleX
-                                params.y = bubbleY
-                                try {
-                                    windowManager.updateViewLayout(composeView, params)
-                                } catch (_: Exception) {}
-                            }
                         }
                     )
                 }
@@ -574,6 +690,7 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(MainActivity.EXTRA_FORCE_OPEN, true)
+            putExtra(MainActivity.EXTRA_OPEN_CONFIG, true)
         }
         startActivity(intent)
         setExpanded(false)
@@ -695,8 +812,6 @@ fun FloatingBubbleRoot(
     dualOpacity: Float,
     dualGapDp: Int,
     isDualVertical: Boolean,
-    onPlusClick: () -> Unit,
-    onMinusClick: () -> Unit,
     isExpanded: Boolean,
     isVisible: Boolean,
     bubbleSizeDp: Int,
@@ -705,32 +820,24 @@ fun FloatingBubbleRoot(
     currentVolume: Int,
     maxVolume: Int,
     isMuted: Boolean,
-    onBubbleClick: () -> Unit,
     onCloseClick: () -> Unit,
     onVolumeChange: (Int) -> Unit,
     onVolumeStep: (Int) -> Unit,
     onToggleMute: () -> Unit,
     onStreamChange: (Int) -> Unit,
-    onOpenSettings: () -> Unit,
-    onDragDelta: (dx: Int, dy: Int) -> Unit
+    onOpenSettings: () -> Unit
 ) {
     if (!isVisible) return
 
     if (isDualMode) {
-        // Dual (+ / -) Mode: 2 separate bubbles together on screen
-        // Tapping + or - directly changes volume and triggers default sound slider without opening floating popup window
         DraggableDualBubbles(
             sizeDp = dualSizeDp,
             gapDp = dualGapDp,
             isVertical = isDualVertical,
-            opacity = dualOpacity,
-            onPlusClick = onPlusClick,
-            onMinusClick = onMinusClick,
-            onDragDelta = onDragDelta
+            opacity = dualOpacity
         )
     } else {
         if (!isExpanded) {
-            // Collapsed Draggable Bubble
             Box(
                 modifier = Modifier.alpha(opacity)
             ) {
@@ -738,14 +845,10 @@ fun FloatingBubbleRoot(
                     sizeDp = bubbleSizeDp,
                     currentVolume = currentVolume,
                     maxVolume = maxVolume,
-                    isMuted = isMuted,
-                    onClick = onBubbleClick,
-                    onDragDelta = onDragDelta
+                    isMuted = isMuted
                 )
             }
         } else {
-            // Expanded Volume Control Panel with Fullscreen Touch Scrim
-            // Tapping anywhere in the empty space outside the card closes it!
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -758,7 +861,6 @@ fun FloatingBubbleRoot(
                     },
                 contentAlignment = Alignment.Center
             ) {
-                // Keep clicks inside the Card from propagating to the outer dismiss box
                 Box(
                     modifier = Modifier
                         .alpha(opacity)
@@ -779,8 +881,7 @@ fun FloatingBubbleRoot(
                         onVolumeStep = onVolumeStep,
                         onToggleMute = onToggleMute,
                         onStreamChange = onStreamChange,
-                        onOpenSettings = onOpenSettings,
-                        onDragDelta = onDragDelta
+                        onOpenSettings = onOpenSettings
                     )
                 }
             }
@@ -793,10 +894,7 @@ fun DraggableDualBubbles(
     sizeDp: Int,
     gapDp: Int,
     isVertical: Boolean,
-    opacity: Float,
-    onPlusClick: () -> Unit,
-    onMinusClick: () -> Unit,
-    onDragDelta: (dx: Int, dy: Int) -> Unit
+    opacity: Float
 ) {
     Box(
         modifier = Modifier.alpha(opacity)
@@ -809,16 +907,12 @@ fun DraggableDualBubbles(
                 DualActionBubble(
                     sizeDp = sizeDp,
                     icon = Icons.Default.Add,
-                    contentDescription = "Volume Up",
-                    onClick = onPlusClick,
-                    onDragDelta = onDragDelta
+                    contentDescription = "Volume Up"
                 )
                 DualActionBubble(
                     sizeDp = sizeDp,
                     icon = Icons.Default.Remove,
-                    contentDescription = "Volume Down",
-                    onClick = onMinusClick,
-                    onDragDelta = onDragDelta
+                    contentDescription = "Volume Down"
                 )
             }
         } else {
@@ -829,16 +923,12 @@ fun DraggableDualBubbles(
                 DualActionBubble(
                     sizeDp = sizeDp,
                     icon = Icons.Default.Remove,
-                    contentDescription = "Volume Down",
-                    onClick = onMinusClick,
-                    onDragDelta = onDragDelta
+                    contentDescription = "Volume Down"
                 )
                 DualActionBubble(
                     sizeDp = sizeDp,
                     icon = Icons.Default.Add,
-                    contentDescription = "Volume Up",
-                    onClick = onPlusClick,
-                    onDragDelta = onDragDelta
+                    contentDescription = "Volume Up"
                 )
             }
         }
@@ -849,14 +939,8 @@ fun DraggableDualBubbles(
 fun DualActionBubble(
     sizeDp: Int,
     icon: ImageVector,
-    contentDescription: String,
-    onClick: () -> Unit,
-    onDragDelta: (dx: Int, dy: Int) -> Unit
+    contentDescription: String
 ) {
-    var initialTouchX by remember { mutableFloatStateOf(0f) }
-    var initialTouchY by remember { mutableFloatStateOf(0f) }
-    var hasDragged by remember { mutableStateOf(false) }
-
     val primaryColor = MaterialTheme.colorScheme.primary
     val tertiaryColor = MaterialTheme.colorScheme.tertiary
 
@@ -877,26 +961,6 @@ fun DualActionBubble(
                 1.5.dp,
                 Color.White.copy(alpha = 0.5f),
                 CircleShape
-            )
-            .pointerInputTouch(
-                onTouchDown = { x, y ->
-                    initialTouchX = x
-                    initialTouchY = y
-                    hasDragged = false
-                },
-                onTouchMove = { x, y ->
-                    val dx = (x - initialTouchX).toInt()
-                    val dy = (y - initialTouchY).toInt()
-                    if (abs(dx) > 10 || abs(dy) > 10) {
-                        hasDragged = true
-                        onDragDelta(dx, dy)
-                    }
-                },
-                onTouchUp = {
-                    if (!hasDragged) {
-                        onClick()
-                    }
-                }
             ),
         contentAlignment = Alignment.Center
     ) {
@@ -914,14 +978,8 @@ fun DraggableBubble(
     sizeDp: Int,
     currentVolume: Int,
     maxVolume: Int,
-    isMuted: Boolean,
-    onClick: () -> Unit,
-    onDragDelta: (dx: Int, dy: Int) -> Unit
+    isMuted: Boolean
 ) {
-    var initialTouchX by remember { mutableFloatStateOf(0f) }
-    var initialTouchY by remember { mutableFloatStateOf(0f) }
-    var hasDragged by remember { mutableStateOf(false) }
-
     val volumePercent = if (maxVolume > 0) {
         ((currentVolume.toFloat() / maxVolume) * 100).roundToInt()
     } else 0
@@ -946,26 +1004,6 @@ fun DraggableBubble(
                 1.5.dp,
                 Color.White.copy(alpha = 0.4f),
                 CircleShape
-            )
-            .pointerInputTouch(
-                onTouchDown = { x, y ->
-                    initialTouchX = x
-                    initialTouchY = y
-                    hasDragged = false
-                },
-                onTouchMove = { x, y ->
-                    val dx = (x - initialTouchX).toInt()
-                    val dy = (y - initialTouchY).toInt()
-                    if (abs(dx) > 10 || abs(dy) > 10) {
-                        hasDragged = true
-                        onDragDelta(dx, dy)
-                    }
-                },
-                onTouchUp = {
-                    if (!hasDragged) {
-                        onClick()
-                    }
-                }
             ),
         contentAlignment = Alignment.Center
     ) {
@@ -1004,15 +1042,11 @@ fun VolumeControlPanel(
     onVolumeStep: (Int) -> Unit,
     onToggleMute: () -> Unit,
     onStreamChange: (Int) -> Unit,
-    onOpenSettings: () -> Unit,
-    onDragDelta: (dx: Int, dy: Int) -> Unit
+    onOpenSettings: () -> Unit
 ) {
     val volumePercent = if (maxVolume > 0) {
         ((currentVolume.toFloat() / maxVolume) * 100).roundToInt()
     } else 0
-
-    var initialTouchX by remember { mutableFloatStateOf(0f) }
-    var initialTouchY by remember { mutableFloatStateOf(0f) }
 
     Card(
         modifier = Modifier
@@ -1031,20 +1065,7 @@ fun VolumeControlPanel(
         ) {
             // Header: Drag Handle & Title & Close
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .pointerInputTouch(
-                        onTouchDown = { x, y ->
-                            initialTouchX = x
-                            initialTouchY = y
-                        },
-                        onTouchMove = { x, y ->
-                            val dx = (x - initialTouchX).toInt()
-                            val dy = (y - initialTouchY).toInt()
-                            onDragDelta(dx, dy)
-                        },
-                        onTouchUp = {}
-                    ),
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -1283,30 +1304,4 @@ fun StreamChip(
     )
 }
 
-// Custom touch listener extension for smooth drag without stealing child clicks
-fun Modifier.pointerInputTouch(
-    onTouchDown: (x: Float, y: Float) -> Unit,
-    onTouchMove: (x: Float, y: Float) -> Unit,
-    onTouchUp: () -> Unit
-): Modifier = this.then(
-    Modifier.pointerInput(Unit) {
-        awaitPointerEventScope {
-            while (true) {
-                val down = awaitPointerEvent()
-                val change = down.changes.firstOrNull() ?: continue
-                if (change.pressed) {
-                    onTouchDown(change.position.x, change.position.y)
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val moveChange = event.changes.firstOrNull() ?: break
-                        if (!moveChange.pressed) {
-                            onTouchUp()
-                            break
-                        }
-                        onTouchMove(moveChange.position.x, moveChange.position.y)
-                    }
-                }
-            }
-        }
-    }
-)
+

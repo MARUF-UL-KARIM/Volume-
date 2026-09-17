@@ -66,7 +66,7 @@ class VolumePreferences(context: Context) {
         set(value) = prefs.edit().putInt(KEY_DUAL_STREAM, value).apply()
 
     var showSystemVolumeSlider: Boolean
-        get() = prefs.getBoolean(KEY_SHOW_SYSTEM_SLIDER, true)
+        get() = prefs.getBoolean(KEY_SHOW_SYSTEM_SLIDER, false)
         set(value) = prefs.edit().putBoolean(KEY_SHOW_SYSTEM_SLIDER, value).apply()
 
     companion object {
