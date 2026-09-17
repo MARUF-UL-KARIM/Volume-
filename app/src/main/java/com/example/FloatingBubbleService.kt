@@ -93,6 +93,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
@@ -126,6 +127,7 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     private lateinit var windowManager: WindowManager
     private lateinit var composeView: ComposeView
     private lateinit var params: WindowManager.LayoutParams
+    private var isViewAdded = false
     private lateinit var audioManager: AudioManager
     private lateinit var prefs: VolumePreferences
 
@@ -143,6 +145,15 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     private var bubbleSizeDpState = mutableIntStateOf(56)
     private var darkModeState = mutableIntStateOf(0)
     private var hapticEnabledState = mutableStateOf(true)
+
+    // Dual (+ / -) Mode State
+    private var isDualModeState = mutableStateOf(false)
+    private var dualSizeDpState = mutableIntStateOf(48)
+    private var dualOpacityState = mutableFloatStateOf(0.9f)
+    private var dualGapDpState = mutableIntStateOf(8)
+    private var isDualVerticalState = mutableStateOf(true)
+    private var dualStreamTypeState = mutableIntStateOf(AudioManager.STREAM_MUSIC)
+    private var showSystemSliderState = mutableStateOf(true)
 
     private var bubbleX = 32
     private var bubbleY = 260
@@ -193,6 +204,39 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         isBubbleVisibleState.value = prefs.isBubbleVisible
         isBubbleShowing = prefs.isBubbleVisible
         streamTypeState.intValue = prefs.selectedStream
+
+        isDualModeState.value = prefs.isDualButtonMode
+        dualSizeDpState.intValue = prefs.dualButtonSizeDp
+        dualOpacityState.floatValue = prefs.dualButtonOpacity
+        dualGapDpState.intValue = prefs.dualButtonGapDp
+        isDualVerticalState.value = prefs.isDualVertical
+        dualStreamTypeState.intValue = prefs.dualStreamType
+        showSystemSliderState.value = prefs.showSystemVolumeSlider
+    }
+
+    private fun adjustDualVolume(delta: Int) {
+        val stream = dualStreamTypeState.intValue
+        val flags = if (showSystemSliderState.value) AudioManager.FLAG_SHOW_UI else 0
+        if (stream == AudioManager.STREAM_VOICE_CALL) {
+            val cur = if (prefs.isCallZeroVolume) 0 else audioManager.getStreamVolume(stream)
+            val max = audioManager.getStreamMaxVolume(stream).coerceAtLeast(1)
+            val next = (cur + delta).coerceIn(0, max)
+            if (next == 0) {
+                prefs.isCallZeroVolume = true
+                try { audioManager.setStreamVolume(stream, 0, flags) } catch (_: Exception) {}
+                try { audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, flags) } catch (_: Exception) {}
+            } else {
+                prefs.isCallZeroVolume = false
+                try { audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, flags) } catch (_: Exception) {}
+                try { audioManager.setStreamVolume(stream, next, flags) } catch (_: Exception) {}
+            }
+        } else {
+            val direction = if (delta > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+            audioManager.adjustStreamVolume(stream, direction, flags)
+        }
+        updateVolumeState(streamTypeState.intValue)
+        triggerHaptic()
+        updateNotification()
     }
 
     private fun updateVolumeState(streamType: Int) {
@@ -211,6 +255,7 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
     private fun setExpanded(expanded: Boolean) {
         if (isExpandedState.value == expanded) return
         isExpandedState.value = expanded
+        if (!isViewAdded) return
         if (expanded) {
             // Expand WindowManager layout to MATCH_PARENT so taps in empty space/outside close it
             params.width = WindowManager.LayoutParams.MATCH_PARENT
@@ -236,14 +281,21 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         if (!visible && isExpandedState.value) {
             isExpandedState.value = false
         }
-        composeView.visibility = if (visible) View.VISIBLE else View.GONE
-        params.width = if (isExpandedState.value) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT
-        params.height = if (isExpandedState.value) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT
-        params.x = if (isExpandedState.value) 0 else bubbleX
-        params.y = if (isExpandedState.value) 0 else bubbleY
-        try {
-            windowManager.updateViewLayout(composeView, params)
-        } catch (_: Exception) {}
+        if (!isViewAdded) {
+            tryAddOverlayView()
+        }
+        if (::composeView.isInitialized) {
+            composeView.visibility = if (visible) View.VISIBLE else View.GONE
+        }
+        if (isViewAdded) {
+            params.width = if (isExpandedState.value) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT
+            params.height = if (isExpandedState.value) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT
+            params.x = if (isExpandedState.value) 0 else bubbleX
+            params.y = if (isExpandedState.value) 0 else bubbleY
+            try {
+                windowManager.updateViewLayout(composeView, params)
+            } catch (_: Exception) {}
+        }
         updateNotification()
         updateTileState()
     }
@@ -282,6 +334,17 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
 
                 MyApplicationTheme(darkTheme = isDark) {
                     FloatingBubbleRoot(
+                        isDualMode = isDualModeState.value,
+                        dualSizeDp = dualSizeDpState.intValue,
+                        dualOpacity = dualOpacityState.floatValue,
+                        dualGapDp = dualGapDpState.intValue,
+                        isDualVertical = isDualVerticalState.value,
+                        onPlusClick = {
+                            adjustDualVolume(1)
+                        },
+                        onMinusClick = {
+                            adjustDualVolume(-1)
+                        },
                         isExpanded = isExpandedState.value,
                         isVisible = isBubbleVisibleState.value,
                         bubbleSizeDp = bubbleSizeDpState.intValue,
@@ -332,9 +395,22 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
             }
         }
 
+        tryAddOverlayView()
+    }
+
+    private fun tryAddOverlayView() {
+        if (isViewAdded) return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            return
+        }
         try {
-            windowManager.addView(composeView, params)
-        } catch (_: Exception) {}
+            if (::composeView.isInitialized && composeView.parent == null) {
+                windowManager.addView(composeView, params)
+                isViewAdded = true
+            }
+        } catch (_: Exception) {
+            isViewAdded = false
+        }
     }
 
     private fun registerVolumeObservers() {
@@ -383,6 +459,9 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
             }
             ACTION_UPDATE_PREFS -> {
                 loadPreferences()
+                if (!isViewAdded && isBubbleVisibleState.value) {
+                    tryAddOverlayView()
+                }
                 updateVolumeState(streamTypeState.intValue)
                 updateNotification()
             }
@@ -581,10 +660,11 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
         } catch (_: Exception) {}
 
         try {
-            if (::composeView.isInitialized && composeView.parent != null) {
+            if (::composeView.isInitialized && isViewAdded) {
                 windowManager.removeView(composeView)
             }
         } catch (_: Exception) {}
+        isViewAdded = false
 
         super.onDestroy()
     }
@@ -610,6 +690,13 @@ class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner
 
 @Composable
 fun FloatingBubbleRoot(
+    isDualMode: Boolean,
+    dualSizeDp: Int,
+    dualOpacity: Float,
+    dualGapDp: Int,
+    isDualVertical: Boolean,
+    onPlusClick: () -> Unit,
+    onMinusClick: () -> Unit,
     isExpanded: Boolean,
     isVisible: Boolean,
     bubbleSizeDp: Int,
@@ -629,61 +716,196 @@ fun FloatingBubbleRoot(
 ) {
     if (!isVisible) return
 
-    if (!isExpanded) {
-        // Collapsed Draggable Bubble
-        Box(
-            modifier = Modifier.alpha(opacity)
-        ) {
-            DraggableBubble(
-                sizeDp = bubbleSizeDp,
-                currentVolume = currentVolume,
-                maxVolume = maxVolume,
-                isMuted = isMuted,
-                onClick = onBubbleClick,
-                onDragDelta = onDragDelta
-            )
-        }
+    if (isDualMode) {
+        // Dual (+ / -) Mode: 2 separate bubbles together on screen
+        // Tapping + or - directly changes volume and triggers default sound slider without opening floating popup window
+        DraggableDualBubbles(
+            sizeDp = dualSizeDp,
+            gapDp = dualGapDp,
+            isVertical = isDualVertical,
+            opacity = dualOpacity,
+            onPlusClick = onPlusClick,
+            onMinusClick = onMinusClick,
+            onDragDelta = onDragDelta
+        )
     } else {
-        // Expanded Volume Control Panel with Fullscreen Touch Scrim
-        // Tapping anywhere in the empty space outside the card closes it!
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.38f))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null
-                ) {
-                    onCloseClick()
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            // Keep clicks inside the Card from propagating to the outer dismiss box
+        if (!isExpanded) {
+            // Collapsed Draggable Bubble
+            Box(
+                modifier = Modifier.alpha(opacity)
+            ) {
+                DraggableBubble(
+                    sizeDp = bubbleSizeDp,
+                    currentVolume = currentVolume,
+                    maxVolume = maxVolume,
+                    isMuted = isMuted,
+                    onClick = onBubbleClick,
+                    onDragDelta = onDragDelta
+                )
+            }
+        } else {
+            // Expanded Volume Control Panel with Fullscreen Touch Scrim
+            // Tapping anywhere in the empty space outside the card closes it!
             Box(
                 modifier = Modifier
-                    .alpha(opacity)
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.38f))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null
                     ) {
-                        // consume touch inside panel
-                    }
+                        onCloseClick()
+                    },
+                contentAlignment = Alignment.Center
             ) {
-                VolumeControlPanel(
-                    streamType = streamType,
-                    currentVolume = currentVolume,
-                    maxVolume = maxVolume,
-                    isMuted = isMuted,
-                    onClose = onCloseClick,
-                    onVolumeChange = onVolumeChange,
-                    onVolumeStep = onVolumeStep,
-                    onToggleMute = onToggleMute,
-                    onStreamChange = onStreamChange,
-                    onOpenSettings = onOpenSettings,
+                // Keep clicks inside the Card from propagating to the outer dismiss box
+                Box(
+                    modifier = Modifier
+                        .alpha(opacity)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            // consume touch inside panel
+                        }
+                ) {
+                    VolumeControlPanel(
+                        streamType = streamType,
+                        currentVolume = currentVolume,
+                        maxVolume = maxVolume,
+                        isMuted = isMuted,
+                        onClose = onCloseClick,
+                        onVolumeChange = onVolumeChange,
+                        onVolumeStep = onVolumeStep,
+                        onToggleMute = onToggleMute,
+                        onStreamChange = onStreamChange,
+                        onOpenSettings = onOpenSettings,
+                        onDragDelta = onDragDelta
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DraggableDualBubbles(
+    sizeDp: Int,
+    gapDp: Int,
+    isVertical: Boolean,
+    opacity: Float,
+    onPlusClick: () -> Unit,
+    onMinusClick: () -> Unit,
+    onDragDelta: (dx: Int, dy: Int) -> Unit
+) {
+    Box(
+        modifier = Modifier.alpha(opacity)
+    ) {
+        if (isVertical) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(gapDp.dp)
+            ) {
+                DualActionBubble(
+                    sizeDp = sizeDp,
+                    icon = Icons.Default.Add,
+                    contentDescription = "Volume Up",
+                    onClick = onPlusClick,
+                    onDragDelta = onDragDelta
+                )
+                DualActionBubble(
+                    sizeDp = sizeDp,
+                    icon = Icons.Default.Remove,
+                    contentDescription = "Volume Down",
+                    onClick = onMinusClick,
+                    onDragDelta = onDragDelta
+                )
+            }
+        } else {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(gapDp.dp)
+            ) {
+                DualActionBubble(
+                    sizeDp = sizeDp,
+                    icon = Icons.Default.Remove,
+                    contentDescription = "Volume Down",
+                    onClick = onMinusClick,
+                    onDragDelta = onDragDelta
+                )
+                DualActionBubble(
+                    sizeDp = sizeDp,
+                    icon = Icons.Default.Add,
+                    contentDescription = "Volume Up",
+                    onClick = onPlusClick,
                     onDragDelta = onDragDelta
                 )
             }
         }
+    }
+}
+
+@Composable
+fun DualActionBubble(
+    sizeDp: Int,
+    icon: ImageVector,
+    contentDescription: String,
+    onClick: () -> Unit,
+    onDragDelta: (dx: Int, dy: Int) -> Unit
+) {
+    var initialTouchX by remember { mutableFloatStateOf(0f) }
+    var initialTouchY by remember { mutableFloatStateOf(0f) }
+    var hasDragged by remember { mutableStateOf(false) }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+
+    Box(
+        modifier = Modifier
+            .size(sizeDp.dp)
+            .shadow(8.dp, CircleShape)
+            .clip(CircleShape)
+            .background(
+                brush = Brush.linearGradient(
+                    listOf(
+                        primaryColor,
+                        tertiaryColor
+                    )
+                )
+            )
+            .border(
+                1.5.dp,
+                Color.White.copy(alpha = 0.5f),
+                CircleShape
+            )
+            .pointerInputTouch(
+                onTouchDown = { x, y ->
+                    initialTouchX = x
+                    initialTouchY = y
+                    hasDragged = false
+                },
+                onTouchMove = { x, y ->
+                    val dx = (x - initialTouchX).toInt()
+                    val dy = (y - initialTouchY).toInt()
+                    if (abs(dx) > 10 || abs(dy) > 10) {
+                        hasDragged = true
+                        onDragDelta(dx, dy)
+                    }
+                },
+                onTouchUp = {
+                    if (!hasDragged) {
+                        onClick()
+                    }
+                }
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = Color.White,
+            modifier = Modifier.size((sizeDp * 0.52f).dp)
+        )
     }
 }
 

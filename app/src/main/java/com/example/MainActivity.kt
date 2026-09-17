@@ -234,6 +234,14 @@ fun MainScreen(
     var selectedStream by remember { mutableIntStateOf(prefs.selectedStream) }
     var isServiceRunning by remember { mutableStateOf(hasOverlayPermission) }
 
+    var isDualMode by remember { mutableStateOf(prefs.isDualButtonMode) }
+    var dualSize by remember { mutableIntStateOf(prefs.dualButtonSizeDp) }
+    var dualOpacity by remember { mutableFloatStateOf(prefs.dualButtonOpacity) }
+    var dualGap by remember { mutableIntStateOf(prefs.dualButtonGapDp) }
+    var isDualVertical by remember { mutableStateOf(prefs.isDualVertical) }
+    var dualStream by remember { mutableIntStateOf(prefs.dualStreamType) }
+    var showSystemSlider by remember { mutableStateOf(prefs.showSystemVolumeSlider) }
+
     // Notification permission launcher for Android 13+
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -663,6 +671,374 @@ fun MainScreen(
                                 tint = Color.White,
                                 modifier = Modifier.size((bubbleSize * 0.45f).dp)
                             )
+                        }
+                    }
+                }
+            }
+
+            // Dual (+ / -) Quick Volume Buttons Card
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Dual (+ / -) Quick Buttons",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 16.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Show separate + and - buttons directly on screen",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = isDualMode,
+                            onCheckedChange = {
+                                isDualMode = it
+                                prefs.isDualButtonMode = it
+                                onPrefsUpdated()
+                            },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                checkedTrackColor = MaterialTheme.colorScheme.surface
+                            )
+                        )
+                    }
+
+                    AnimatedVisibility(visible = isDualMode) {
+                        Column {
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Alignment: Vertical vs Horizontal
+                            Text(
+                                text = "Button Alignment",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                FilterChip(
+                                    selected = isDualVertical,
+                                    onClick = {
+                                        isDualVertical = true
+                                        prefs.isDualVertical = true
+                                        onPrefsUpdated()
+                                    },
+                                    label = { Text("Top / Bottom", fontSize = 12.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                FilterChip(
+                                    selected = !isDualVertical,
+                                    onClick = {
+                                        isDualVertical = false
+                                        prefs.isDualVertical = false
+                                        onPrefsUpdated()
+                                    },
+                                    label = { Text("Side by Side", fontSize = 12.sp) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Target Sound Stream
+                            Text(
+                                text = "Target Sound Stream",
+                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                FilterChip(
+                                    selected = dualStream == AudioManager.STREAM_MUSIC,
+                                    onClick = {
+                                        dualStream = AudioManager.STREAM_MUSIC
+                                        prefs.dualStreamType = AudioManager.STREAM_MUSIC
+                                        onPrefsUpdated()
+                                    },
+                                    label = { Text("Media", fontSize = 11.sp, maxLines = 1) },
+                                    leadingIcon = { Icon(Icons.Default.MusicNote, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                FilterChip(
+                                    selected = dualStream == AudioManager.STREAM_RING,
+                                    onClick = {
+                                        dualStream = AudioManager.STREAM_RING
+                                        prefs.dualStreamType = AudioManager.STREAM_RING
+                                        onPrefsUpdated()
+                                    },
+                                    label = { Text("Ring", fontSize = 11.sp, maxLines = 1) },
+                                    leadingIcon = { Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                FilterChip(
+                                    selected = dualStream == AudioManager.STREAM_NOTIFICATION,
+                                    onClick = {
+                                        dualStream = AudioManager.STREAM_NOTIFICATION
+                                        prefs.dualStreamType = AudioManager.STREAM_NOTIFICATION
+                                        onPrefsUpdated()
+                                    },
+                                    label = { Text("Notif", fontSize = 11.sp, maxLines = 1) },
+                                    leadingIcon = { Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                FilterChip(
+                                    selected = dualStream == AudioManager.STREAM_ALARM,
+                                    onClick = {
+                                        dualStream = AudioManager.STREAM_ALARM
+                                        prefs.dualStreamType = AudioManager.STREAM_ALARM
+                                        onPrefsUpdated()
+                                    },
+                                    label = { Text("Alarm", fontSize = 11.sp, maxLines = 1) },
+                                    leadingIcon = { Icon(Icons.Default.Alarm, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                FilterChip(
+                                    selected = dualStream == AudioManager.STREAM_VOICE_CALL,
+                                    onClick = {
+                                        dualStream = AudioManager.STREAM_VOICE_CALL
+                                        prefs.dualStreamType = AudioManager.STREAM_VOICE_CALL
+                                        onPrefsUpdated()
+                                    },
+                                    label = { Text("Speaker/Call", fontSize = 11.sp, maxLines = 1) },
+                                    leadingIcon = { Icon(Icons.Default.Phone, contentDescription = null, modifier = Modifier.size(13.dp)) },
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Show Default System Sound Slider Toggle
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Show Phone Sound Slider",
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = "Show phone's native volume popup when tapping + or -",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Switch(
+                                    checked = showSystemSlider,
+                                    onCheckedChange = {
+                                        showSystemSlider = it
+                                        prefs.showSystemVolumeSlider = it
+                                        onPrefsUpdated()
+                                    }
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Button Size Slider
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.PhotoSizeSelectSmall, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = "Button Size", fontSize = 14.sp)
+                                }
+                                Text(text = "${dualSize}dp", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                            Slider(
+                                value = dualSize.toFloat(),
+                                onValueChange = {
+                                    dualSize = it.roundToInt()
+                                    prefs.dualButtonSizeDp = dualSize
+                                    onPrefsUpdated()
+                                },
+                                valueRange = 36f..72f,
+                                steps = 8
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Opacity Slider
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Opacity, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = "Button Opacity", fontSize = 14.sp)
+                                }
+                                Text(text = "${(dualOpacity * 100).roundToInt()}%", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                            Slider(
+                                value = dualOpacity,
+                                onValueChange = {
+                                    dualOpacity = it
+                                    prefs.dualButtonOpacity = dualOpacity
+                                    onPrefsUpdated()
+                                },
+                                valueRange = 0.2f..1.0f
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Spacing / Distance Slider
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(text = "Distance Between Buttons", fontSize = 14.sp)
+                                }
+                                Text(text = "${dualGap}dp", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            }
+                            Slider(
+                                value = dualGap.toFloat(),
+                                onValueChange = {
+                                    dualGap = it.roundToInt()
+                                    prefs.dualButtonGapDp = dualGap
+                                    onPrefsUpdated()
+                                },
+                                valueRange = 0f..40f,
+                                steps = 7
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Live Dual Preview
+                            Text(
+                                text = "Live Preview",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                if (isDualVertical) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(dualGap.dp),
+                                        modifier = Modifier.alpha(dualOpacity)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(dualSize.dp)
+                                                .shadow(6.dp, CircleShape)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    Brush.linearGradient(
+                                                        listOf(
+                                                            MaterialTheme.colorScheme.primary,
+                                                            MaterialTheme.colorScheme.tertiary
+                                                        )
+                                                    )
+                                                )
+                                                .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(dualSize.dp)
+                                                .shadow(6.dp, CircleShape)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    Brush.linearGradient(
+                                                        listOf(
+                                                            MaterialTheme.colorScheme.primary,
+                                                            MaterialTheme.colorScheme.tertiary
+                                                        )
+                                                    )
+                                                )
+                                                .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Default.Remove, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
+                                        }
+                                    }
+                                } else {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(dualGap.dp),
+                                        modifier = Modifier.alpha(dualOpacity)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(dualSize.dp)
+                                                .shadow(6.dp, CircleShape)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    Brush.linearGradient(
+                                                        listOf(
+                                                            MaterialTheme.colorScheme.primary,
+                                                            MaterialTheme.colorScheme.tertiary
+                                                        )
+                                                    )
+                                                )
+                                                .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Default.Remove, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(dualSize.dp)
+                                                .shadow(6.dp, CircleShape)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    Brush.linearGradient(
+                                                        listOf(
+                                                            MaterialTheme.colorScheme.primary,
+                                                            MaterialTheme.colorScheme.tertiary
+                                                        )
+                                                    )
+                                                )
+                                                .border(1.5.dp, Color.White.copy(alpha = 0.5f), CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White, modifier = Modifier.size((dualSize * 0.52f).dp))
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
