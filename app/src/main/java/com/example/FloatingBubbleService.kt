@@ -1,0 +1,1090 @@
+package com.example
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.ServiceInfo
+import android.database.ContentObserver
+import android.graphics.PixelFormat
+import android.media.AudioManager
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.provider.Settings
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.VolumeDown
+import androidx.compose.material.icons.filled.VolumeMute
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.core.app.NotificationCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.example.ui.theme.MyApplicationTheme
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+class FloatingBubbleService : Service(), LifecycleOwner, SavedStateRegistryOwner {
+
+    private val lifecycleRegistry = LifecycleRegistry(this)
+    private val savedStateRegistryController = SavedStateRegistryController.create(this)
+
+    override val lifecycle: Lifecycle
+        get() = lifecycleRegistry
+
+    override val savedStateRegistry: SavedStateRegistry
+        get() = savedStateRegistryController.savedStateRegistry
+
+    private lateinit var windowManager: WindowManager
+    private lateinit var composeView: ComposeView
+    private lateinit var params: WindowManager.LayoutParams
+    private lateinit var audioManager: AudioManager
+    private lateinit var prefs: VolumePreferences
+
+    private var vibrator: Vibrator? = null
+    private val handler = Handler(Looper.getMainLooper())
+
+    // Internal reactive state holder
+    private var streamTypeState = mutableIntStateOf(AudioManager.STREAM_MUSIC)
+    private var currentVolState = mutableIntStateOf(0)
+    private var maxVolState = mutableIntStateOf(15)
+    private var isMutedState = mutableStateOf(false)
+    private var isExpandedState = mutableStateOf(false)
+    private var isBubbleVisibleState = mutableStateOf(true)
+    private var bubbleOpacityState = mutableFloatStateOf(0.95f)
+    private var bubbleSizeDpState = mutableIntStateOf(56)
+    private var darkModeState = mutableIntStateOf(0)
+    private var hapticEnabledState = mutableStateOf(true)
+
+    private var bubbleX = 32
+    private var bubbleY = 260
+
+    private var volumeObserver: ContentObserver? = null
+    private var volumeReceiver: BroadcastReceiver? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        savedStateRegistryController.performRestore(null)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+
+        prefs = VolumePreferences(this)
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+        audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+
+        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vibratorManager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+            vibratorManager?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+
+        loadPreferences()
+        isServiceRunning = true
+        isBubbleShowing = isBubbleVisibleState.value
+        updateVolumeState(streamTypeState.intValue)
+
+        createNotificationChannel()
+        startForegroundServiceNotification()
+
+        setupWindowManager()
+        registerVolumeObservers()
+        updateTileState()
+
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+    }
+
+    private fun loadPreferences() {
+        bubbleOpacityState.floatValue = prefs.bubbleOpacity
+        bubbleSizeDpState.intValue = prefs.bubbleSizeDp
+        darkModeState.intValue = prefs.darkMode
+        hapticEnabledState.value = prefs.isHapticEnabled
+        isBubbleVisibleState.value = prefs.isBubbleVisible
+        isBubbleShowing = prefs.isBubbleVisible
+        streamTypeState.intValue = prefs.selectedStream
+    }
+
+    private fun updateVolumeState(streamType: Int) {
+        val max = audioManager.getStreamMaxVolume(streamType)
+        val current = audioManager.getStreamVolume(streamType)
+        maxVolState.intValue = if (max <= 0) 15 else max
+        if (streamType == AudioManager.STREAM_VOICE_CALL && prefs.isCallZeroVolume) {
+            currentVolState.intValue = 0
+            isMutedState.value = true
+        } else {
+            currentVolState.intValue = current
+            isMutedState.value = current == 0
+        }
+    }
+
+    private fun setExpanded(expanded: Boolean) {
+        if (isExpandedState.value == expanded) return
+        isExpandedState.value = expanded
+        if (expanded) {
+            // Expand WindowManager layout to MATCH_PARENT so taps in empty space/outside close it
+            params.width = WindowManager.LayoutParams.MATCH_PARENT
+            params.height = WindowManager.LayoutParams.MATCH_PARENT
+            params.x = 0
+            params.y = 0
+        } else {
+            // Collapse WindowManager layout back to bubble dimensions
+            params.width = WindowManager.LayoutParams.WRAP_CONTENT
+            params.height = WindowManager.LayoutParams.WRAP_CONTENT
+            params.x = bubbleX
+            params.y = bubbleY
+        }
+        try {
+            windowManager.updateViewLayout(composeView, params)
+        } catch (_: Exception) {}
+    }
+
+    private fun setBubbleVisibility(visible: Boolean) {
+        isBubbleVisibleState.value = visible
+        prefs.isBubbleVisible = visible
+        isBubbleShowing = visible
+        if (!visible && isExpandedState.value) {
+            isExpandedState.value = false
+        }
+        composeView.visibility = if (visible) View.VISIBLE else View.GONE
+        params.width = if (isExpandedState.value) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT
+        params.height = if (isExpandedState.value) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT
+        params.x = if (isExpandedState.value) 0 else bubbleX
+        params.y = if (isExpandedState.value) 0 else bubbleY
+        try {
+            windowManager.updateViewLayout(composeView, params)
+        } catch (_: Exception) {}
+        updateNotification()
+        updateTileState()
+    }
+
+    private fun setupWindowManager() {
+        val windowType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        params = WindowManager.LayoutParams(
+            if (isExpandedState.value) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT,
+            if (isExpandedState.value) WindowManager.LayoutParams.MATCH_PARENT else WindowManager.LayoutParams.WRAP_CONTENT,
+            windowType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = if (isExpandedState.value) 0 else bubbleX
+            y = if (isExpandedState.value) 0 else bubbleY
+        }
+
+        composeView = ComposeView(this).apply {
+            visibility = if (isBubbleVisibleState.value) View.VISIBLE else View.GONE
+            setViewTreeLifecycleOwner(this@FloatingBubbleService)
+            setViewTreeSavedStateRegistryOwner(this@FloatingBubbleService)
+
+            setContent {
+                val isDark = when (darkModeState.intValue) {
+                    1 -> false
+                    2 -> true
+                    else -> isSystemInDarkTheme()
+                }
+
+                MyApplicationTheme(darkTheme = isDark) {
+                    FloatingBubbleRoot(
+                        isExpanded = isExpandedState.value,
+                        isVisible = isBubbleVisibleState.value,
+                        bubbleSizeDp = bubbleSizeDpState.intValue,
+                        opacity = bubbleOpacityState.floatValue,
+                        streamType = streamTypeState.intValue,
+                        currentVolume = currentVolState.intValue,
+                        maxVolume = maxVolState.intValue,
+                        isMuted = isMutedState.value,
+                        onBubbleClick = {
+                            triggerHaptic()
+                            setExpanded(true)
+                        },
+                        onCloseClick = {
+                            triggerHaptic()
+                            setExpanded(false)
+                        },
+                        onVolumeChange = { newVolume ->
+                            setVolume(newVolume)
+                        },
+                        onVolumeStep = { delta ->
+                            adjustVolumeStep(delta)
+                        },
+                        onToggleMute = {
+                            toggleMute()
+                        },
+                        onStreamChange = { newStream ->
+                            streamTypeState.intValue = newStream
+                            prefs.selectedStream = newStream
+                            updateVolumeState(newStream)
+                            triggerHaptic()
+                        },
+                        onOpenSettings = {
+                            openMainActivity()
+                        },
+                        onDragDelta = { dx, dy ->
+                            if (!isExpandedState.value) {
+                                bubbleX = (bubbleX + dx).coerceAtLeast(0)
+                                bubbleY = (bubbleY + dy).coerceAtLeast(0)
+                                params.x = bubbleX
+                                params.y = bubbleY
+                                try {
+                                    windowManager.updateViewLayout(composeView, params)
+                                } catch (_: Exception) {}
+                            }
+                        }
+                    )
+                }
+            }
+        }
+
+        try {
+            windowManager.addView(composeView, params)
+        } catch (_: Exception) {}
+    }
+
+    private fun registerVolumeObservers() {
+        volumeObserver = object : ContentObserver(handler) {
+            override fun onChange(selfChange: Boolean) {
+                super.onChange(selfChange)
+                updateVolumeState(streamTypeState.intValue)
+                updateNotification()
+            }
+        }
+        contentResolver.registerContentObserver(
+            Settings.System.CONTENT_URI,
+            true,
+            volumeObserver!!
+        )
+
+        volumeReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                updateVolumeState(streamTypeState.intValue)
+                updateNotification()
+            }
+        }
+        val filter = IntentFilter("android.media.VOLUME_CHANGED_ACTION")
+        registerReceiver(volumeReceiver, filter)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_VOLUME_UP -> {
+                adjustVolumeStep(1)
+            }
+            ACTION_VOLUME_DOWN -> {
+                adjustVolumeStep(-1)
+            }
+            ACTION_TOGGLE_MUTE -> {
+                toggleMute()
+            }
+            ACTION_SHOW_BUBBLE -> {
+                setBubbleVisibility(true)
+                triggerHaptic()
+            }
+            ACTION_TOGGLE_BUBBLE -> {
+                val newVis = !isBubbleVisibleState.value
+                setBubbleVisibility(newVis)
+                triggerHaptic()
+            }
+            ACTION_UPDATE_PREFS -> {
+                loadPreferences()
+                updateVolumeState(streamTypeState.intValue)
+                updateNotification()
+            }
+            ACTION_STOP_SERVICE -> {
+                stopSelf()
+            }
+        }
+        return START_STICKY
+    }
+
+    private fun adjustVolumeStep(delta: Int) {
+        val stream = streamTypeState.intValue
+        if (stream == AudioManager.STREAM_VOICE_CALL) {
+            val cur = if (prefs.isCallZeroVolume) 0 else currentVolState.intValue
+            val next = (cur + delta).coerceIn(0, maxVolState.intValue)
+            setVolume(next)
+            return
+        }
+        val direction = if (delta > 0) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+        audioManager.adjustStreamVolume(stream, direction, AudioManager.FLAG_SHOW_UI)
+        updateVolumeState(stream)
+        triggerHaptic()
+        updateNotification()
+    }
+
+    private fun setVolume(newVolume: Int) {
+        val stream = streamTypeState.intValue
+        val clamped = newVolume.coerceIn(0, maxVolState.intValue)
+        if (stream == AudioManager.STREAM_VOICE_CALL) {
+            if (clamped == 0) {
+                prefs.isCallZeroVolume = true
+                currentVolState.intValue = 0
+                isMutedState.value = true
+                try {
+                    audioManager.setStreamVolume(stream, 0, AudioManager.FLAG_SHOW_UI)
+                } catch (_: Exception) {}
+                try {
+                    audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_MUTE, AudioManager.FLAG_SHOW_UI)
+                } catch (_: Exception) {}
+            } else {
+                prefs.isCallZeroVolume = false
+                try {
+                    audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_SHOW_UI)
+                } catch (_: Exception) {}
+                try {
+                    audioManager.setStreamVolume(stream, clamped, AudioManager.FLAG_SHOW_UI)
+                } catch (_: Exception) {}
+                updateVolumeState(stream)
+            }
+        } else {
+            audioManager.setStreamVolume(stream, clamped, AudioManager.FLAG_SHOW_UI)
+            updateVolumeState(stream)
+        }
+        triggerHaptic()
+        updateNotification()
+    }
+
+    private fun toggleMute() {
+        val stream = streamTypeState.intValue
+        if (stream == AudioManager.STREAM_VOICE_CALL) {
+            if (prefs.isCallZeroVolume || isMutedState.value || currentVolState.intValue == 0) {
+                prefs.isCallZeroVolume = false
+                val restored = 2.coerceAtMost(maxVolState.intValue)
+                try {
+                    audioManager.adjustStreamVolume(stream, AudioManager.ADJUST_UNMUTE, AudioManager.FLAG_SHOW_UI)
+                } catch (_: Exception) {}
+                try {
+                    audioManager.setStreamVolume(stream, restored, AudioManager.FLAG_SHOW_UI)
+                } catch (_: Exception) {}
+                updateVolumeState(stream)
+            } else {
+                setVolume(0)
+            }
+            triggerHaptic()
+            updateNotification()
+            return
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val isCurrentlyMuted = audioManager.isStreamMute(stream) || audioManager.getStreamVolume(stream) == 0
+            val direction = if (isCurrentlyMuted) AudioManager.ADJUST_UNMUTE else AudioManager.ADJUST_MUTE
+            audioManager.adjustStreamVolume(stream, direction, AudioManager.FLAG_SHOW_UI)
+        } else {
+            val current = audioManager.getStreamVolume(stream)
+            if (current > 0) {
+                audioManager.setStreamVolume(stream, 0, AudioManager.FLAG_SHOW_UI)
+            } else {
+                val restored = (maxVolState.intValue * 0.4f).roundToInt().coerceAtLeast(1)
+                audioManager.setStreamVolume(stream, restored, AudioManager.FLAG_SHOW_UI)
+            }
+        }
+        updateVolumeState(stream)
+        triggerHaptic()
+        updateNotification()
+    }
+
+    private fun triggerHaptic() {
+        if (!hapticEnabledState.value) return
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator?.vibrate(VibrationEffect.createOneShot(24, VibrationEffect.DEFAULT_AMPLITUDE))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator?.vibrate(24)
+            }
+        } catch (_: Exception) {}
+    }
+
+    private fun openMainActivity() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(MainActivity.EXTRA_FORCE_OPEN, true)
+        }
+        startActivity(intent)
+        setExpanded(false)
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Volume Service",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Background service for floating volume bubble"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager?.createNotificationChannel(channel)
+        }
+    }
+
+    private fun buildNotification(): Notification {
+        val openAppIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(MainActivity.EXTRA_FORCE_OPEN, true)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_volume_tile)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText("Volume Bubble is active")
+            .setContentIntent(openAppIntent)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .build()
+    }
+
+    private fun startForegroundServiceNotification() {
+        val notification = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun updateNotification() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        manager?.notify(NOTIFICATION_ID, buildNotification())
+    }
+
+    private fun updateTileState() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                android.service.quicksettings.TileService.requestListeningState(
+                    this,
+                    android.content.ComponentName(this, VolumeTileService::class.java)
+                )
+            } catch (_: Exception) {}
+        }
+    }
+
+    override fun onDestroy() {
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+        lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+
+        isServiceRunning = false
+        isBubbleShowing = false
+        updateTileState()
+
+        try {
+            volumeObserver?.let { contentResolver.unregisterContentObserver(it) }
+            volumeReceiver?.let { unregisterReceiver(it) }
+        } catch (_: Exception) {}
+
+        try {
+            if (::composeView.isInitialized && composeView.parent != null) {
+                windowManager.removeView(composeView)
+            }
+        } catch (_: Exception) {}
+
+        super.onDestroy()
+    }
+
+    companion object {
+        var isServiceRunning: Boolean = false
+            internal set
+        var isBubbleShowing: Boolean = false
+            internal set
+
+        const val CHANNEL_ID = "volume_bubble_control_channel"
+        const val NOTIFICATION_ID = 2026
+
+        const val ACTION_VOLUME_UP = "com.example.volumebubble.ACTION_VOLUME_UP"
+        const val ACTION_VOLUME_DOWN = "com.example.volumebubble.ACTION_VOLUME_DOWN"
+        const val ACTION_TOGGLE_MUTE = "com.example.volumebubble.ACTION_TOGGLE_MUTE"
+        const val ACTION_SHOW_BUBBLE = "com.example.volumebubble.ACTION_SHOW_BUBBLE"
+        const val ACTION_TOGGLE_BUBBLE = "com.example.volumebubble.ACTION_TOGGLE_BUBBLE"
+        const val ACTION_UPDATE_PREFS = "com.example.volumebubble.ACTION_UPDATE_PREFS"
+        const val ACTION_STOP_SERVICE = "com.example.volumebubble.ACTION_STOP_SERVICE"
+    }
+}
+
+@Composable
+fun FloatingBubbleRoot(
+    isExpanded: Boolean,
+    isVisible: Boolean,
+    bubbleSizeDp: Int,
+    opacity: Float,
+    streamType: Int,
+    currentVolume: Int,
+    maxVolume: Int,
+    isMuted: Boolean,
+    onBubbleClick: () -> Unit,
+    onCloseClick: () -> Unit,
+    onVolumeChange: (Int) -> Unit,
+    onVolumeStep: (Int) -> Unit,
+    onToggleMute: () -> Unit,
+    onStreamChange: (Int) -> Unit,
+    onOpenSettings: () -> Unit,
+    onDragDelta: (dx: Int, dy: Int) -> Unit
+) {
+    if (!isVisible) return
+
+    if (!isExpanded) {
+        // Collapsed Draggable Bubble
+        Box(
+            modifier = Modifier.alpha(opacity)
+        ) {
+            DraggableBubble(
+                sizeDp = bubbleSizeDp,
+                currentVolume = currentVolume,
+                maxVolume = maxVolume,
+                isMuted = isMuted,
+                onClick = onBubbleClick,
+                onDragDelta = onDragDelta
+            )
+        }
+    } else {
+        // Expanded Volume Control Panel with Fullscreen Touch Scrim
+        // Tapping anywhere in the empty space outside the card closes it!
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.38f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null
+                ) {
+                    onCloseClick()
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            // Keep clicks inside the Card from propagating to the outer dismiss box
+            Box(
+                modifier = Modifier
+                    .alpha(opacity)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        // consume touch inside panel
+                    }
+            ) {
+                VolumeControlPanel(
+                    streamType = streamType,
+                    currentVolume = currentVolume,
+                    maxVolume = maxVolume,
+                    isMuted = isMuted,
+                    onClose = onCloseClick,
+                    onVolumeChange = onVolumeChange,
+                    onVolumeStep = onVolumeStep,
+                    onToggleMute = onToggleMute,
+                    onStreamChange = onStreamChange,
+                    onOpenSettings = onOpenSettings,
+                    onDragDelta = onDragDelta
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun DraggableBubble(
+    sizeDp: Int,
+    currentVolume: Int,
+    maxVolume: Int,
+    isMuted: Boolean,
+    onClick: () -> Unit,
+    onDragDelta: (dx: Int, dy: Int) -> Unit
+) {
+    var initialTouchX by remember { mutableFloatStateOf(0f) }
+    var initialTouchY by remember { mutableFloatStateOf(0f) }
+    var hasDragged by remember { mutableStateOf(false) }
+
+    val volumePercent = if (maxVolume > 0) {
+        ((currentVolume.toFloat() / maxVolume) * 100).roundToInt()
+    } else 0
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+
+    Box(
+        modifier = Modifier
+            .size(sizeDp.dp)
+            .shadow(10.dp, CircleShape)
+            .clip(CircleShape)
+            .background(
+                brush = Brush.linearGradient(
+                    listOf(
+                        primaryColor,
+                        tertiaryColor
+                    )
+                )
+            )
+            .border(
+                1.5.dp,
+                Color.White.copy(alpha = 0.4f),
+                CircleShape
+            )
+            .pointerInputTouch(
+                onTouchDown = { x, y ->
+                    initialTouchX = x
+                    initialTouchY = y
+                    hasDragged = false
+                },
+                onTouchMove = { x, y ->
+                    val dx = (x - initialTouchX).toInt()
+                    val dy = (y - initialTouchY).toInt()
+                    if (abs(dx) > 10 || abs(dy) > 10) {
+                        hasDragged = true
+                        onDragDelta(dx, dy)
+                    }
+                },
+                onTouchUp = {
+                    if (!hasDragged) {
+                        onClick()
+                    }
+                }
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = when {
+                    isMuted || currentVolume == 0 -> Icons.Default.VolumeMute
+                    currentVolume < maxVolume / 2 -> Icons.Default.VolumeDown
+                    else -> Icons.Default.VolumeUp
+                },
+                contentDescription = "Volume Bubble",
+                tint = Color.White,
+                modifier = Modifier.size((sizeDp * 0.46f).dp)
+            )
+            Text(
+                text = "$volumePercent%",
+                color = Color.White,
+                fontSize = (sizeDp * 0.19f).sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun VolumeControlPanel(
+    streamType: Int,
+    currentVolume: Int,
+    maxVolume: Int,
+    isMuted: Boolean,
+    onClose: () -> Unit,
+    onVolumeChange: (Int) -> Unit,
+    onVolumeStep: (Int) -> Unit,
+    onToggleMute: () -> Unit,
+    onStreamChange: (Int) -> Unit,
+    onOpenSettings: () -> Unit,
+    onDragDelta: (dx: Int, dy: Int) -> Unit
+) {
+    val volumePercent = if (maxVolume > 0) {
+        ((currentVolume.toFloat() / maxVolume) * 100).roundToInt()
+    } else 0
+
+    var initialTouchX by remember { mutableFloatStateOf(0f) }
+    var initialTouchY by remember { mutableFloatStateOf(0f) }
+
+    Card(
+        modifier = Modifier
+            .width(300.dp)
+            .wrapContentHeight()
+            .shadow(16.dp, RoundedCornerShape(24.dp)),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Header: Drag Handle & Title & Close
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .pointerInputTouch(
+                        onTouchDown = { x, y ->
+                            initialTouchX = x
+                            initialTouchY = y
+                        },
+                        onTouchMove = { x, y ->
+                            val dx = (x - initialTouchX).toInt()
+                            val dy = (y - initialTouchY).toInt()
+                            onDragDelta(dx, dy)
+                        },
+                        onTouchUp = {}
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = when {
+                                isMuted || currentVolume == 0 -> Icons.Default.VolumeMute
+                                streamType == AudioManager.STREAM_VOICE_CALL -> Icons.Default.Phone
+                                currentVolume < maxVolume / 2 -> Icons.Default.VolumeDown
+                                else -> Icons.Default.VolumeUp
+                            },
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = when (streamType) {
+                                AudioManager.STREAM_VOICE_CALL -> "Call Volume"
+                                AudioManager.STREAM_RING -> "Ring Volume"
+                                AudioManager.STREAM_ALARM -> "Alarm Volume"
+                                else -> "Media Volume"
+                            },
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Tap space to close",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onOpenSettings,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    IconButton(
+                        onClick = onClose,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Audio Stream Selector Tabs
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                StreamChip(
+                    icon = Icons.Default.MusicNote,
+                    label = "Media",
+                    selected = streamType == AudioManager.STREAM_MUSIC,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onStreamChange(AudioManager.STREAM_MUSIC) }
+                )
+                StreamChip(
+                    icon = Icons.Default.Notifications,
+                    label = "Ring",
+                    selected = streamType == AudioManager.STREAM_RING,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onStreamChange(AudioManager.STREAM_RING) }
+                )
+                StreamChip(
+                    icon = Icons.Default.Alarm,
+                    label = "Alarm",
+                    selected = streamType == AudioManager.STREAM_ALARM,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onStreamChange(AudioManager.STREAM_ALARM) }
+                )
+                StreamChip(
+                    icon = Icons.Default.Phone,
+                    label = "Call",
+                    selected = streamType == AudioManager.STREAM_VOICE_CALL,
+                    modifier = Modifier.weight(1f),
+                    onClick = { onStreamChange(AudioManager.STREAM_VOICE_CALL) }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Volume Percentage Badge
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = when (streamType) {
+                        AudioManager.STREAM_VOICE_CALL -> "Voice Call Level"
+                        AudioManager.STREAM_RING -> "Ringtone Level"
+                        AudioManager.STREAM_ALARM -> "Alarm Level"
+                        else -> "Media Level"
+                    },
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isMuted || currentVolume == 0) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Text(
+                        text = if (isMuted || currentVolume == 0) "0% (Zero)" else "$volumePercent%",
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isMuted || currentVolume == 0) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Volume Slider
+            Slider(
+                value = currentVolume.toFloat(),
+                onValueChange = { onVolumeChange(it.roundToInt()) },
+                valueRange = 0f..maxVolume.toFloat(),
+                steps = if (maxVolume > 1) maxVolume - 1 else 0,
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.primary,
+                    activeTrackColor = MaterialTheme.colorScheme.primary,
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Step-by-Step Plus and Minus Buttons + Mute Toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Minus (-) Button
+                FilledTonalIconButton(
+                    onClick = { onVolumeStep(-1) },
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Remove,
+                        contentDescription = "Volume Down",
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+
+                // Mute / Unmute Button
+                FilledIconButton(
+                    onClick = onToggleMute,
+                    modifier = Modifier.size(46.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = if (isMuted) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = if (isMuted) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                ) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                        contentDescription = "Toggle Mute"
+                    )
+                }
+
+                // Plus (+) Button
+                FilledTonalIconButton(
+                    onClick = { onVolumeStep(1) },
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Volume Up",
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun StreamChip(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                text = label,
+                fontSize = 10.5.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 1
+            )
+        },
+        leadingIcon = {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(13.dp))
+        },
+        colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            selectedLeadingIconColor = MaterialTheme.colorScheme.onPrimaryContainer
+        ),
+        modifier = modifier.height(32.dp)
+    )
+}
+
+// Custom touch listener extension for smooth drag without stealing child clicks
+fun Modifier.pointerInputTouch(
+    onTouchDown: (x: Float, y: Float) -> Unit,
+    onTouchMove: (x: Float, y: Float) -> Unit,
+    onTouchUp: () -> Unit
+): Modifier = this.then(
+    Modifier.pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val down = awaitPointerEvent()
+                val change = down.changes.firstOrNull() ?: continue
+                if (change.pressed) {
+                    onTouchDown(change.position.x, change.position.y)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val moveChange = event.changes.firstOrNull() ?: break
+                        if (!moveChange.pressed) {
+                            onTouchUp()
+                            break
+                        }
+                        onTouchMove(moveChange.position.x, moveChange.position.y)
+                    }
+                }
+            }
+        }
+    }
+)

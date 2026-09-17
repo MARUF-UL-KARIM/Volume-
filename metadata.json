@@ -1,0 +1,6 @@
+{
+  "name": "Volume Bubble",
+  "description": "Floating volume control bubble for easy sound management",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
